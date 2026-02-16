@@ -1,0 +1,50 @@
+appId: com.swiftspeech.dictation
+productName: Swift Speech
+icon: assets/icons/swiftSpeech.icns
+directories:
+  output: out
+npmRebuild: false
+files:
+  - dist/**/*
+  - node_modules/uiohook-napi/**/*
+extraResources:
+  - from: resources/whisper/
+    to: whisper/
+    filter:
+      - "**/*"
+      - "!.gitkeep"
+  - from: resources/lib/
+    to: lib/
+    filter:
+      - "*.dylib"
+  - from: resources/models/
+    to: models/
+    filter:
+      - "**/*"
+      - "!.gitkeep"
+  - from: assets/icons/tray/
+    to: tray/
+    filter:
+      - "*.png"
+mac:
+  category: public.app-category.productivity
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  entitlements: entitlements.mac.plist
+  entitlementsInherit: entitlements.mac.plist
+  hardenedRuntime: true
+  notarize: true
+  extendInfo:
+    NSMicrophoneUsageDescription: "Swift Speech needs microphone access to record your speech for transcription."
+dmg:
+  title: Swift Speech
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications

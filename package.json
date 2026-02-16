@@ -1,0 +1,31 @@
+{
+  "name": "swift-speech",
+  "version": "0.1.0",
+  "description": "Smart dictation app for macOS — local transcription with filler word removal",
+  "main": "dist/main/index.js",
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs && electron .",
+    "download:whisper": "npx tsx scripts/download-whisper.ts",
+    "download:model": "npx tsx scripts/download-model.ts",
+    "setup": "npm run download:whisper && npm run download:model",
+    "setup:tools": "npx tsx scripts/setup-tools.ts",
+    "predist": "npx tsx scripts/prepare-dist.ts",
+    "dist": "npm run build && electron-builder",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "author": "Hamza Ahmed",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.6.0",
+    "tsx": "^4.19.0",
+    "vitest": "^2.1.0"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.4"
+  }
+}

@@ -1,0 +1,66 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  background: transparent;
+  -webkit-app-region: no-drag;
+  user-select: none;
+  overflow: hidden;
+}
+
+#app {
+  background: rgba(30, 30, 30, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  height: 100vh;
+  padding: 0 10px;
+}
+
+#icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+/* Waveform bars */
+.waveform {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: 12px;
+  width: 100%;
+}
+
+.waveform .bar {
+  width: 3px;
+  min-height: 2px;
+  background: #30d158;
+  border-radius: 1.5px;
+  transition: height 0.06s ease-out;
+  flex-shrink: 0;
+}
+
+/* Processing spinner — #icon.spinner overrides #icon width */
+#icon.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: rgba(255, 255, 255, 0.8);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

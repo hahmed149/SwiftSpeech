@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+out/
+
+# Whisper binary + dylibs + model (downloaded at setup, not checked in)
+resources/whisper/*
+!resources/whisper/.gitkeep
+resources/models/*
+!resources/models/.gitkeep
+resources/lib/
+
+# Packaged artifacts
+*.dmg
+*.zip
+*.blockmap
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.*
+
+# Test artifacts
+test.txt
+coverage/
+
+# Claude Code
+.claude/
+
+docs/

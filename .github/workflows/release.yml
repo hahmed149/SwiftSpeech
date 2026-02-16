@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "[0-9]+.*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-dmg:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      # Cache whisper binary + dylibs + speech model (~150MB, identical across releases)
+      - name: Cache whisper resources
+        id: cache-resources
+        uses: actions/cache@v4
+        with:
+          path: |
+            resources/whisper/whisper-cli
+            resources/lib/
+            resources/models/ggml-base.en.bin
+          key: whisper-resources-${{ hashFiles('scripts/download-whisper.ts', 'scripts/download-model.ts', 'scripts/prepare-dist.ts') }}
+
+      # Cache Electron binary + electron-builder tools (~150MB)
+      - name: Cache Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: electron-${{ hashFiles('package-lock.json') }}
+
+      # Only install/download if whisper resources aren't cached
+      - name: Install whisper-cpp
+        if: steps.cache-resources.outputs.cache-hit != 'true'
+        run: brew install whisper-cpp
+
+      - name: Download whisper binary and libs
+        if: steps.cache-resources.outputs.cache-hit != 'true'
+        run: npm run download:whisper
+
+      - name: Download whisper model
+        if: steps.cache-resources.outputs.cache-hit != 'true'
+        run: npm run download:model
+
+      - name: Prepare distribution resources
+        if: steps.cache-resources.outputs.cache-hit != 'true'
+        run: npm run predist
+
+      # Build, sign, and notarize
+      - name: Build and package
+        run: npm run build && npx electron-builder --publish never
+        env:
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      # Upload DMG and ZIP to the GitHub release
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/*.dmg
+            out/*.zip
+          generate_release_notes: true
