@@ -21,12 +21,17 @@ export function createPopover(): BrowserWindow {
     transparent: true,
     hasShadow: true,
     backgroundThrottling: false,
+    // macOS: appear over fullscreen apps without switching desktops
+    visibleOnAllWorkspaces: true,
     webPreferences: {
       preload: join(__dirname, "..", "preload", "index.js"),
       nodeIntegration: false,
       contextIsolation: true,
     },
   });
+
+  // Enable visibility on fullscreen spaces (macOS-specific)
+  popover.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
 
   popover.loadFile(join(__dirname, "..", "renderer", "index.html"));
   return popover;
@@ -36,8 +41,9 @@ export function showPopover(): void {
   if (!popover) return;
   cancelAutoHide();
 
-  // Center horizontally on the primary display, near the top
-  const display = screen.getPrimaryDisplay();
+  // Center horizontally on the display where the cursor is, near the top
+  const cursorPoint = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursorPoint);
   const { x: dx, y: dy, width: dw } = display.workArea;
   const x = Math.round(dx + dw / 2 - POPOVER_WIDTH / 2);
   const y = dy + TOP_OFFSET;

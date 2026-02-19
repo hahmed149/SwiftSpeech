@@ -32,19 +32,31 @@ function getAudioConstraints(): MediaTrackConstraints {
 async function acquireMic(): Promise<MediaStream> {
   const label = pinnedDeviceId ? `device=${pinnedDeviceId.slice(0, 16)}...` : "default";
   tritri.log(`[recorder] acquiring mic (${label})...`);
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: getAudioConstraints() });
-  const track = stream.getAudioTracks()[0];
-  tritri.log(`[recorder] mic acquired: ${track?.label}, state=${track?.readyState}`);
-  return stream;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: getAudioConstraints() });
+    const track = stream.getAudioTracks()[0];
+    tritri.log(`[recorder] mic acquired: ${track?.label}, state=${track?.readyState}`);
+    return stream;
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    tritri.log(`[recorder] mic acquisition failed: ${msg}`);
+    tritri.sendMicError(msg);
+    throw err;
+  }
 }
 
 async function enumerateAndSendDevices(): Promise<void> {
   try {
     const allDevices = await navigator.mediaDevices.enumerateDevices();
     const audioInputs: AudioDeviceInfo[] = allDevices
-      .filter((d) => d.kind === "audioinput" && d.deviceId !== "default")
+      .filter((d) => d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications")
       .map((d) => ({ deviceId: d.deviceId, label: d.label || `Microphone ${d.deviceId.slice(0, 8)}` }));
+    tritri.log(`[recorder] enumerated ${audioInputs.length} audio devices: ${audioInputs.map((d) => d.label).join(", ") || "(none)"}`);
     tritri.sendAudioDevices(audioInputs);
+
+    if (audioInputs.length === 0) {
+      tritri.sendMicError("NotFoundError: No microphones detected");
+    }
   } catch (err) {
     tritri.log(`[recorder] enumerateDevices failed: ${err}`);
   }

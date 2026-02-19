@@ -1,6 +1,8 @@
-import { Tray, Menu, nativeImage, app } from "electron";
+import { Tray, Menu, nativeImage, app, shell } from "electron";
 import { join } from "path";
 import type { AudioDeviceInfo } from "../shared/types";
+import { getHealthStatus } from "./health-check";
+import { getLogDir } from "./logger";
 
 let tray: Tray | null = null;
 let currentDevices: AudioDeviceInfo[] = [];
@@ -52,6 +54,26 @@ function rebuildMenu(): void {
     })),
   ];
 
+  // Build health status items
+  const healthItems: Electron.MenuItemConstructorOptions[] = [];
+  const health = getHealthStatus();
+  if (health) {
+    const issues: string[] = [];
+    if (health.mic === "no-permission") issues.push("Mic permission denied");
+    if (!health.whisper) issues.push("Whisper binary missing");
+    if (!health.model) issues.push("Speech model missing");
+    if (!health.ollama) issues.push("Ollama not running");
+    else if (!health.ollamaModel) issues.push("No Ollama model");
+
+    if (issues.length > 0) {
+      healthItems.push({ type: "separator" });
+      healthItems.push({ label: "Issues", enabled: false });
+      for (const issue of issues) {
+        healthItems.push({ label: `  ⚠ ${issue}`, enabled: false });
+      }
+    }
+  }
+
   const menu = Menu.buildFromTemplate([
     { label: `Hold ${hotkeyLabel} to record`, enabled: false },
     { label: "Release to transcribe + paste", enabled: false },
@@ -70,7 +92,9 @@ function rebuildMenu(): void {
     { type: "separator" },
     { label: "Microphone", enabled: false },
     ...micItems,
+    ...healthItems,
     { type: "separator" },
+    { label: "Show Logs", click: () => shell.openPath(getLogDir()) },
     { label: "Quit Swift Speech", click: () => app.quit() },
   ]);
 
