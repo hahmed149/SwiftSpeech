@@ -34,6 +34,7 @@ resources/lib/
 # Environment
 .env
 .env.*
+!.env.example
 
 # Test artifacts
 test.txt

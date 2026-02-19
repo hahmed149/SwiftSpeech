@@ -21,6 +21,9 @@ const api: TritriAPI = {
   sendAudioDevices(devices: AudioDeviceInfo[]) {
     ipcRenderer.send(IPC.AUDIO_DEVICES, devices);
   },
+  sendMicError(error: string) {
+    ipcRenderer.send(IPC.MIC_ERROR, error);
+  },
   onSelectDevice(callback: (deviceId: string) => void) {
     selectDeviceCallback = callback;
   },

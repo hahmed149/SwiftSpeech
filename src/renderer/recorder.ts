@@ -32,19 +32,31 @@ function getAudioConstraints(): MediaTrackConstraints {
 async function acquireMic(): Promise<MediaStream> {
   const label = pinnedDeviceId ? `device=${pinnedDeviceId.slice(0, 16)}...` : "default";
   tritri.log(`[recorder] acquiring mic (${label})...`);
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: getAudioConstraints() });
-  const track = stream.getAudioTracks()[0];
-  tritri.log(`[recorder] mic acquired: ${track?.label}, state=${track?.readyState}`);
-  return stream;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: getAudioConstraints() });
+    const track = stream.getAudioTracks()[0];
+    tritri.log(`[recorder] mic acquired: ${track?.label}, state=${track?.readyState}`);
+    return stream;
+  } catch (err) {
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    tritri.log(`[recorder] mic acquisition failed: ${msg}`);
+    tritri.sendMicError(msg);
+    throw err;
+  }
 }
 
 async function enumerateAndSendDevices(): Promise<void> {
   try {
     const allDevices = await navigator.mediaDevices.enumerateDevices();
     const audioInputs: AudioDeviceInfo[] = allDevices
-      .filter((d) => d.kind === "audioinput" && d.deviceId !== "default")
+      .filter((d) => d.kind === "audioinput" && d.deviceId !== "default" && d.deviceId !== "communications")
       .map((d) => ({ deviceId: d.deviceId, label: d.label || `Microphone ${d.deviceId.slice(0, 8)}` }));
+    tritri.log(`[recorder] enumerated ${audioInputs.length} audio devices: ${audioInputs.map((d) => d.label).join(", ") || "(none)"}`);
     tritri.sendAudioDevices(audioInputs);
+
+    if (audioInputs.length === 0) {
+      tritri.sendMicError("NotFoundError: No microphones detected");
+    }
   } catch (err) {
     tritri.log(`[recorder] enumerateDevices failed: ${err}`);
   }
@@ -98,42 +110,18 @@ function wireSource(stream: MediaStream): void {
 }
 
 async function handleDeviceChange(): Promise<void> {
-  const currentTrack = mediaStream?.getAudioTracks()[0];
-  tritri.log(`[recorder] devicechange fired, recording=${isRecording}, track=${currentTrack?.readyState ?? "none"}, ctx=${audioContext?.state ?? "none"}`);
+  tritri.log(`[recorder] devicechange fired, recording=${isRecording}`);
 
   // Re-enumerate devices so the tray menu stays up to date
   enumerateAndSendDevices();
-
-  if (!audioContext) return;
-
-  // If we have a pinned device and the track is still live, don't touch it
-  if (currentTrack && currentTrack.readyState === "live") return;
-
-  tritri.log("[recorder] track dead, re-acquiring mic");
-  try {
-    mediaStream = await acquireMic();
-    wireSource(mediaStream);
-
-    const track = mediaStream.getAudioTracks()[0];
-    if (track) {
-      track.onended = () => {
-        tritri.log(`[recorder] track.onended fired, state=${track.readyState}`);
-        handleDeviceChange();
-      };
-    }
-  } catch (err) {
-    tritri.log(`[recorder] mic re-acquire failed: ${err}`);
-  }
 }
 
 /**
- * Pre-initialize mic and audio graph on app launch.
+ * Pre-initialize AudioContext on app launch (but do NOT acquire mic yet).
  */
 export async function warmUp(): Promise<void> {
   if (warmReady) return;
   try {
-    mediaStream = await acquireMic();
-
     audioContext = new AudioContext({ sampleRate: TIMING.SAMPLE_RATE });
     tritri.log(`[recorder] warm-up: AudioContext created, state=${audioContext.state}, sampleRate=${audioContext.sampleRate}`);
 
@@ -141,23 +129,21 @@ export async function warmUp(): Promise<void> {
       tritri.log(`[recorder] AudioContext state changed to: ${audioContext?.state}`);
     };
 
-    buildAudioGraph(mediaStream);
-
     navigator.mediaDevices.addEventListener("devicechange", handleDeviceChange);
 
-    const track = mediaStream.getAudioTracks()[0];
-    if (track) {
-      track.onended = () => {
-        tritri.log(`[recorder] track.onended fired, state=${track.readyState}`);
-        handleDeviceChange();
-      };
-    }
-
     warmReady = true;
-    tritri.log("[recorder] warm-up complete — mic is hot");
+    tritri.log("[recorder] warm-up complete — ready (mic not yet acquired)");
 
-    // Send initial device list to main for tray menu
-    await enumerateAndSendDevices();
+    // Send initial device list to main for tray menu (requires brief mic access)
+    // Use a temporary stream just to get device labels, then release it
+    try {
+      const tempStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tempStream.getTracks().forEach((t) => t.stop());
+      await enumerateAndSendDevices();
+    } catch (err) {
+      tritri.log(`[recorder] device enumeration failed: ${err}`);
+      await enumerateAndSendDevices(); // Still try without labels
+    }
   } catch (err) {
     tritri.log(`[recorder] warm-up failed: ${err}`);
   }
@@ -165,40 +151,15 @@ export async function warmUp(): Promise<void> {
 
 /**
  * Switch to a specific mic device (or "" for system default).
+ * The new device will be used on the next recording.
  */
-export async function selectDevice(deviceId: string): Promise<void> {
+export function selectDevice(deviceId: string): void {
   pinnedDeviceId = deviceId || null;
   tritri.log(`[recorder] device pinned: ${pinnedDeviceId ?? "System Default"}`);
-
-  if (!audioContext) return;
-
-  // Stop old tracks
-  if (mediaStream) {
-    mediaStream.getTracks().forEach((t) => {
-      t.onended = null;
-      t.stop();
-    });
-  }
-
-  // Acquire the new device
-  try {
-    mediaStream = await acquireMic();
-    wireSource(mediaStream);
-
-    const track = mediaStream.getAudioTracks()[0];
-    if (track) {
-      track.onended = () => {
-        tritri.log(`[recorder] track.onended fired, state=${track.readyState}`);
-        handleDeviceChange();
-      };
-    }
-  } catch (err) {
-    tritri.log(`[recorder] selectDevice failed: ${err}`);
-  }
 }
 
 /**
- * Start recording — if already warmed up, this is instant.
+ * Start recording — acquires mic on demand.
  */
 export async function startRecording(): Promise<AnalyserNode | null> {
   try {
@@ -220,19 +181,16 @@ export async function startRecording(): Promise<AnalyserNode | null> {
       await audioContext.resume();
     }
 
-    // Verify mic track is still alive — re-acquire if ended
-    const currentTrack = mediaStream?.getAudioTracks()[0];
-    if (!currentTrack || currentTrack.readyState !== "live") {
-      tritri.log(`[recorder] track dead (${currentTrack?.readyState ?? "none"}), re-acquiring mic`);
-      mediaStream = await acquireMic();
-      wireSource(mediaStream);
-      const track = mediaStream.getAudioTracks()[0];
-      if (track) {
-        track.onended = () => {
-          tritri.log(`[recorder] track.onended fired, state=${track.readyState}`);
-          handleDeviceChange();
-        };
-      }
+    // Acquire mic now (on-demand)
+    tritri.log("[recorder] acquiring mic for recording...");
+    mediaStream = await acquireMic();
+    buildAudioGraph(mediaStream);
+
+    const track = mediaStream.getAudioTracks()[0];
+    if (track) {
+      track.onended = () => {
+        tritri.log(`[recorder] track.onended fired, state=${track.readyState}`);
+      };
     }
 
     if (!analyserNode) {
@@ -255,6 +213,22 @@ export function stopRecording(): void {
   tritri.log(`[recorder] stopRecording called, callbacks=${processCallbackCount}`);
   isRecording = false;
   tritri.stopRecording();
+
+  // Release the mic immediately
+  if (mediaStream) {
+    mediaStream.getTracks().forEach((t) => {
+      t.onended = null;
+      t.stop();
+    });
+    mediaStream = null;
+    tritri.log("[recorder] mic released");
+  }
+
+  // Disconnect the source node
+  if (sourceNode) {
+    try { sourceNode.disconnect(); } catch {}
+    sourceNode = null;
+  }
 }
 
 export function teardown(): void {

@@ -7,6 +7,7 @@ export const IPC = {
   RENDERER_LOG: "ss:renderer-log",
   AUDIO_DEVICES: "ss:audio-devices",
   SELECT_DEVICE: "ss:select-device",
+  MIC_ERROR: "ss:mic-error",
 } as const;
 
 export const TIMING = {

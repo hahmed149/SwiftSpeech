@@ -7,7 +7,8 @@ import { checkResources } from "./resource-paths";
 import { detectBackend } from "./transcription/llm-proofread";
 import { ensureOllamaReady } from "./ollama-setup";
 import { loadSettings, saveSettings } from "./settings";
-import { log, logError, LOG_PATH_DISPLAY } from "./logger";
+import { log, logError, logSessionStart, getLogDir } from "./logger";
+import { runHealthCheck } from "./health-check";
 import { IPC, TIMING } from "../shared/constants";
 import type { AudioDeviceInfo } from "../shared/types";
 
@@ -24,13 +25,12 @@ let uiohookManager: UiohookManager | null = null;
 let tray: Electron.Tray | null = null;
 
 app.whenReady().then(() => {
-  log("Swift Speech starting");
-  log(`Log file: ${LOG_PATH_DISPLAY}`);
+  logSessionStart();
 
   const resources = checkResources();
   if (!resources.whisper || !resources.model) {
     logError(
-      `Missing resources. Run: npm run setup\n` +
+      `Missing resources — app may need to be reinstalled\n` +
       `  whisper binary: ${resources.whisper ? "OK" : "MISSING"}\n` +
       `  model file: ${resources.model ? "OK" : "MISSING"}`
     );
@@ -93,11 +93,15 @@ app.whenReady().then(() => {
     logError("Failed to start keyboard hook (Accessibility permission needed?)", err);
   }
 
-  // Ensure Ollama + model are ready (install if needed)
+  // Ensure Ollama + model are ready (install if needed), then run health check
   ensureOllamaReady()
     .then(() => detectBackend())
     .then((b) => log(`Proofreading: ${b}`))
-    .catch((err) => logError("Ollama setup failed", err));
+    .catch((err) => logError("Ollama setup failed", err))
+    .finally(() => {
+      // Run health check after Ollama setup (whether it succeeded or failed)
+      runHealthCheck().catch((err) => logError("Health check failed", err));
+    });
 
   log("Swift Speech ready");
 });

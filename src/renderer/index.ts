@@ -44,6 +44,10 @@ tritri.onPipelineStatus((status: PipelineStatus) => {
       recording = false;
       break;
     case "error":
+      iconEl.className = "error-msg";
+      iconEl.textContent = status.message || "Error";
+      recording = false;
+      break;
     case "idle":
       iconEl.textContent = "";
       iconEl.className = "";

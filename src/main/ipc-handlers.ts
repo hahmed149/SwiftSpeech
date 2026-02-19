@@ -9,6 +9,8 @@ import { transcribe } from "./transcription/whisper-runner";
 import { proofreadWithLLM } from "./transcription/llm-proofread";
 import { pasteText } from "./clipboard-paste";
 import { log, logError } from "./logger";
+import { notify } from "./notifications";
+import { checkResources } from "./resource-paths";
 
 let audioChunks: Float32Array[] = [];
 let isRecording = false;
@@ -28,6 +30,17 @@ export function setupIpcHandlers(
   // Renderer log forwarding
   ipcMain.on(IPC.RENDERER_LOG, (_event, msg: string) => {
     log(`[renderer] ${msg}`);
+  });
+
+  ipcMain.on(IPC.MIC_ERROR, (_event, errorMsg: string) => {
+    log(`[mic] Error from renderer: ${errorMsg}`);
+    if (errorMsg.includes("NotAllowedError") || errorMsg.includes("Permission")) {
+      notify("Swift Speech", "Microphone permission denied. Grant access in System Settings > Privacy & Security > Microphone.");
+    } else if (errorMsg.includes("NotFoundError") || errorMsg.includes("Requested device not found")) {
+      notify("Swift Speech", "Microphone not found. Check that your microphone is connected.");
+    } else {
+      notify("Swift Speech", `Microphone error: ${errorMsg.slice(0, 100)}`);
+    }
   });
 
   ipcMain.on(IPC.START_RECORDING, () => {
@@ -61,6 +74,15 @@ export function setupIpcHandlers(
     const wavPath = join(tmpdir(), `ss-${Date.now()}.wav`);
 
     try {
+      // Check if we received any audio data at all
+      if (audioChunks.length === 0) {
+        log("No audio chunks received — microphone may not be working");
+        notify("Swift Speech", "No audio captured. Check your microphone connection and permissions.");
+        sendStatus(win, { stage: "error", message: "No mic input" });
+        onPipelineComplete("error");
+        return;
+      }
+
       const totalLength = audioChunks.reduce((sum, c) => sum + c.length, 0);
 
       // Discard very short recordings
@@ -82,6 +104,20 @@ export function setupIpcHandlers(
       }
       audioChunks = [];
 
+      // Check whisper resources before attempting transcription
+      const resources = checkResources();
+      if (!resources.whisper || !resources.model) {
+        const missing = [];
+        if (!resources.whisper) missing.push("whisper binary");
+        if (!resources.model) missing.push("speech model");
+        const msg = `Missing ${missing.join(" and ")}`;
+        log(`[error] ${msg}`);
+        notify("Swift Speech — Broken Install", `${msg}. Please reinstall the app from the latest release.`);
+        sendStatus(win, { stage: "error", message: "Broken install" });
+        onPipelineComplete("error");
+        return;
+      }
+
       // Write WAV
       const int16 = float32ToInt16(merged);
       writeWav(wavPath, int16);
@@ -95,7 +131,7 @@ export function setupIpcHandlers(
 
       if (!rawText.trim()) {
         log("No speech detected");
-        sendStatus(win, { stage: "error" });
+        sendStatus(win, { stage: "error", message: "No speech detected" });
         onPipelineComplete("error");
         return;
       }
@@ -107,14 +143,15 @@ export function setupIpcHandlers(
       const cleaned = await proofreadWithLLM(rawText);
       if (!cleaned) {
         log("[error] LLM proofreading unavailable — cannot proceed");
-        sendStatus(win, { stage: "error" });
+        notify("Swift Speech", "Ollama not available. Make sure Ollama is running with a model installed.");
+        sendStatus(win, { stage: "error", message: "Ollama unavailable" });
         onPipelineComplete("error");
         return;
       }
       log(`[timing] LLM proofread: ${Date.now() - t0}ms`);
       log(`[llm] input  (${rawText.length} chars): "${rawText}"`);
       log(`[llm] output (${cleaned.length} chars): "${cleaned}"`);
-      log(`[final] pasted text: "${cleaned}"`);;
+      log(`[final] pasted text: "${cleaned}"`);
 
       // Paste
       sendStatus(win, { stage: "pasting" });
@@ -126,9 +163,22 @@ export function setupIpcHandlers(
       log(`[timing] Total pipeline: ${Date.now() - pipelineStart}ms`);
       onPipelineComplete("done");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
+      const detail = err instanceof Error ? err.message : "Unknown error";
       logError("Pipeline failed", err);
-      sendStatus(win, { stage: "error" });
+
+      // Provide specific error notifications based on the error type
+      let userMsg = "Error";
+      if (detail.includes("whisper") || detail.includes("Whisper")) {
+        userMsg = "Transcription failed";
+        notify("Swift Speech", `Transcription failed: ${detail.slice(0, 100)}`);
+      } else if (detail.includes("Paste failed") || detail.includes("Accessibility")) {
+        userMsg = "Paste failed";
+        notify("Swift Speech", "Paste failed. Grant Accessibility permission in System Settings > Privacy & Security.");
+      } else {
+        notify("Swift Speech", `Error: ${detail.slice(0, 100)}`);
+      }
+
+      sendStatus(win, { stage: "error", message: userMsg });
       onPipelineComplete("error");
     } finally {
       if (existsSync(wavPath)) {
